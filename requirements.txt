@@ -1,0 +1,4 @@
+tqdm
+torchvision
+Pillow
+torch>=1.9.0
