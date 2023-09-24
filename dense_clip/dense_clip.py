@@ -7,6 +7,7 @@ import urllib
 from tqdm import tqdm
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
 from PIL import Image
+from pathlib import Path
 
 try:
     from torchvision.transforms import InterpolationMode
@@ -122,6 +123,7 @@ class DenseCLIP(nn.Module):
         filename = os.path.basename(url)
         download_target = os.path.join(os.path.expanduser("~/.cache/clip"), filename)
         if not os.path.exists(download_target):
+            Path(download_target).parent.mkdir(exist_ok=True, parents=True)
             with urllib.request.urlopen(url) as source, open(download_target, "wb") as output:
                 with tqdm(total=int(source.info().get("Content-Length")), ncols=80, unit='iB', unit_scale=True, unit_divisor=1024) as loop:
                     while True:
@@ -140,6 +142,7 @@ class DenseCLIP(nn.Module):
         filename = os.path.basename(url)
         download_target = os.path.join(os.path.expanduser("~/.cache/clip"), filename)
         if not os.path.exists(download_target):
+            Path(download_target).parent.mkdir(exist_ok=True, parents=True)
             with urllib.request.urlopen(url) as source, open(download_target, "wb") as output:
                 with tqdm(total=int(source.info().get("Content-Length")), ncols=80, unit='iB', unit_scale=True, unit_divisor=1024) as loop:
                     while True:
