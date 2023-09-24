@@ -110,10 +110,10 @@ class DenseCLIP(nn.Module):
 
         self.preprocess = Compose([
             ToTensor(),
-            Resize(input_resolution, interpolation=BICUBIC),
-            CenterCrop(input_resolution),
+            Resize((input_resolution, input_resolution), interpolation=BICUBIC),
             Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
         ])
+
 
         self.load_state_dict(state_dict)
 
@@ -153,15 +153,21 @@ class DenseCLIP(nn.Module):
         state_dict = torch.load(download_target, map_location="cpu").visual.state_dict()
         self.load_state_dict(state_dict)
 
-    def extract(self, image: Image):
+    def forward(self, image: Image):
         H, W = image.height, image.width
         with torch.no_grad():
             x = self.preprocess(image).unsqueeze(0).to(self.conv1.weight.data)
-            x = self.forward(x)
+            x = self.run(x)
             return torch.nn.functional.interpolate(x, size=(H, W), mode='bicubic', align_corners=False)[0]
 
+    def forward_with_numpy(self, ndarray):
+        H, W, C = ndarray.shape
+        with torch.no_grad():
+            x = self.preprocess(ndarray).unsqueeze(0).to(self.conv1.weight.data)
+            x = self.run(x)
+            return torch.nn.functional.interpolate(x, size=(H, W), mode='bicubic', align_corners=False)[0]
 
-    def forward(self, x: torch.Tensor):
+    def run(self, x: torch.Tensor):
         B, C, H, W = x.shape
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
