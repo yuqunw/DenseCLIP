@@ -6,6 +6,7 @@ import os
 import urllib
 from tqdm import tqdm
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
+from torchvision.transforms.functional import normalize
 from PIL import Image
 from pathlib import Path
 
@@ -102,6 +103,7 @@ class DenseCLIP(nn.Module):
         scale = width ** -0.5
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
         self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
+        self.grid_size = grid_size
         self.ln_pre = LayerNorm(width)
 
         self.transformer = Transformer(width, layers, heads)
@@ -111,7 +113,6 @@ class DenseCLIP(nn.Module):
 
         self.preprocess = Compose([
             ToTensor(),
-            Resize((input_resolution, input_resolution), interpolation=BICUBIC),
             Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
         ])
 
@@ -163,20 +164,29 @@ class DenseCLIP(nn.Module):
             x = self.run(x)
             return torch.nn.functional.interpolate(x, size=(H, W), mode='bicubic', align_corners=False)[0]
 
-    def forward_with_numpy(self, ndarray):
-        H, W, C = ndarray.shape
+    def forward_with_tensor(self, x):
+        B, C, H, W = x.shape
         with torch.no_grad():
-            x = self.preprocess(ndarray).unsqueeze(0).to(self.conv1.weight.data)
+            x = normalize(x, (0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
             x = self.run(x)
-            return torch.nn.functional.interpolate(x, size=(H, W), mode='bicubic', align_corners=False)[0]
+            return torch.nn.functional.interpolate(x, size=(H, W), mode='bicubic', align_corners=False)
 
     def run(self, x: torch.Tensor):
         B, C, H, W = x.shape
         x = self.conv1(x)  # shape = [*, width, grid, grid]
+        width, pH, pW = x.shape[-3:]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
-        x = x + self.positional_embedding.to(x.dtype)
+
+        # apply pos encoding at varying image size
+        # self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
+        patch_embed = self.positional_embedding[:-1, :].view(self.grid_size, self.grid_size, width).permute(2, 0, 1).to(x.dtype)
+        patch_embed = torch.nn.functional.interpolate(patch_embed[None], size=(pH, pW), mode='bicubic', align_corners=False)[0].view(width, -1).permute(1, 0)
+        cls_embed = self.positional_embedding[-1:, :].to(x.dtype)
+        pos_embed = torch.cat([cls_embed, patch_embed], dim=0)
+
+        x = x + pos_embed
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
