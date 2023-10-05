@@ -9,12 +9,33 @@ from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normal
 from torchvision.transforms.functional import normalize
 from PIL import Image
 from pathlib import Path
+import math
+import itertools
 
 try:
     from torchvision.transforms import InterpolationMode
     BICUBIC = InterpolationMode.BICUBIC
 except ImportError:
     BICUBIC = Image.BICUBIC
+
+
+class CenterPadding(torch.nn.Module):
+    def __init__(self, multiple = 14):
+        super().__init__()
+        self.multiple = multiple
+
+    def _get_pad(self, size):
+        new_size = math.ceil(size / self.multiple) * self.multiple
+        pad_size = new_size - size
+        pad_size_left = pad_size // 2
+        pad_size_right = pad_size - pad_size_left
+        return pad_size_left, pad_size_right
+
+    @torch.inference_mode()
+    def forward(self, x):
+        pads = list(itertools.chain.from_iterable(self._get_pad(m) for m in x.shape[:1:-1]))
+        output = F.pad(x, pads)
+        return output
 
 
 _MODELS = {
@@ -110,12 +131,13 @@ class DenseCLIP(nn.Module):
 
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
-
         self.preprocess = Compose([
-            ToTensor(),
-            Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-        ])
-
+                # T.CenterCrop(224),
+                ToTensor(),
+                lambda x: x.unsqueeze(0),
+                CenterPadding(),
+                Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+            ])
 
         self.load_state_dict(state_dict)
 
@@ -160,9 +182,10 @@ class DenseCLIP(nn.Module):
     def forward(self, image: Image):
         H, W = image.height, image.width
         with torch.no_grad():
-            x = self.preprocess(image).unsqueeze(0).to(self.conv1.weight.data)
+            x = self.preprocess(image).to(self.conv1.weight.data)
             x = self.run(x)
-            return torch.nn.functional.interpolate(x, size=(H, W), mode='bicubic', align_corners=False)[0]
+            x = x.detach().cpu().to(torch.float32).numpy()
+            return x
 
     def forward_with_tensor(self, x):
         B, C, H, W = x.shape
