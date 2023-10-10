@@ -184,7 +184,7 @@ class DenseCLIP(nn.Module):
         with torch.no_grad():
             x = self.preprocess(image).to(self.conv1.weight.data)
             x = self.run(x)
-            x = x.detach().cpu().to(torch.float32).numpy()
+            # x = x.detach().cpu().to(torch.float32).numpy()
             return x
 
     def forward_with_tensor(self, x):
